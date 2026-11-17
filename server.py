@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import http.cookies
 import json
+import math
 import os
 import re
 import secrets
@@ -13,14 +14,14 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 DB_PATH = DATA_DIR / "ass.db"
 COOKIE = "ass_session"
 SESSION_SECONDS = 60 * 60 * 24 * 14
-FIELDS = ("date", "type", "person", "customer", "project", "sales", "location", "channel", "equipment", "quantity", "hours", "status", "description", "result")
+FIELDS = ("date", "type", "person", "customer", "project", "sales", "location", "channel", "equipment", "quantity", "hours", "status", "description", "result", "contact_name", "contact_phone", "service_time", "problem", "parts", "follow_up")
 
 
 def connect():
@@ -32,6 +33,8 @@ def connect():
     db.execute("CREATE TABLE IF NOT EXISTS sessions (token_hash BLOB PRIMARY KEY, expires_at INTEGER NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL)")
     db.commit()
+    os.chmod(DATA_DIR, 0o700)
+    os.chmod(DB_PATH, 0o600)
     return db
 
 
@@ -46,12 +49,18 @@ def clean_record(data):
     if not out["date"] or not out["type"] or not out["person"] or not out["customer"] or not out["description"]:
         raise ValueError("日期、类型、处理人员、用户/单位和服务内容为必填项")
     try:
-        if out["hours"] and float(out["hours"]) < 0:
+        if out["hours"] and (not math.isfinite(float(out["hours"])) or float(out["hours"]) < 0):
             raise ValueError
         if out["quantity"] and int(out["quantity"]) < 0:
             raise ValueError
     except ValueError:
         raise ValueError("用时和数量必须是有效的非负数字")
+    if out["type"] == "上门送货" and not all(out[key] for key in ("location", "service_time", "equipment", "quantity")):
+        raise ValueError("上门送货单请填写送达地址、送达时间、设备型号和数量")
+    if out["type"] == "上门维护" and not all(out[key] for key in ("location", "service_time", "problem")):
+        raise ValueError("上门维护单请填写服务地点、到访时间和故障/用户需求")
+    if out["status"] == "已完成" and (not out["hours"] or float(out["hours"]) <= 0):
+        raise ValueError("完成服务时请填写工程师投入工时")
     return out
 
 

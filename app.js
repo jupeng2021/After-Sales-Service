@@ -63,7 +63,7 @@
     const list = records.filter(r => (!type || r.type === type) && (!person || r.person === person) && (!status || r.status === status) && (!query || [r.customer, r.project, r.description, r.result, r.person, r.location].join(' ').toLowerCase().includes(query))).sort((a, b) => b.date.localeCompare(a.date));
     $('recordCount').textContent = `共 ${list.length} 条记录`;
     $('empty').hidden = list.length > 0;
-    $('tbody').innerHTML = list.map(r => `<tr><td>${esc(r.date)}</td><td><span class="type-tag tag-${typeInfo(r.type).key}">${esc(r.type)}</span></td><td><b>${esc(r.customer)}</b><div class="muted">${esc(r.project || '未关联项目')}</div></td><td>${esc(r.person)}</td><td title="${esc(r.description)}">${esc(r.description.length > 34 ? r.description.slice(0, 34) + '…' : r.description)}</td><td>${Number(r.hours || 0) || '—'}</td><td><span class="status ${r.status === '已完成' ? 'done' : r.status === '处理中' ? 'processing' : 'pending'}">${esc(r.status)}</span></td><td><div class="row-actions"><button class="link-btn" data-edit="${esc(r.id)}">编辑</button><button class="link-btn delete" data-delete="${esc(r.id)}">删除</button></div></td></tr>`).join('');
+    $('tbody').innerHTML = list.map(r => `<tr><td>${esc(r.date)}${r.service_time ? `<div class="muted">${esc(r.service_time)}</div>` : ''}</td><td><span class="type-tag tag-${typeInfo(r.type).key}">${esc(r.type)}</span></td><td><b>${esc(r.customer)}</b><div class="muted">${esc(r.project || '未关联项目')}</div></td><td>${esc(r.person)}</td><td title="${esc(r.description)}">${esc(r.description.length > 34 ? r.description.slice(0, 34) + '…' : r.description)}</td><td>${Number(r.hours || 0) || '—'} 小时</td><td><span class="status ${r.status === '已完成' ? 'done' : r.status === '处理中' ? 'processing' : 'pending'}">${esc(r.status)}</span></td><td><div class="row-actions"><button class="link-btn" data-print="${esc(r.id)}">打印</button><button class="link-btn" data-edit="${esc(r.id)}">编辑</button><button class="link-btn delete" data-delete="${esc(r.id)}">删除</button></div></td></tr>`).join('');
     renderCalendar();
   }
   function localDate(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
@@ -85,18 +85,36 @@
     $('calendarGrid').innerHTML = heads + cells;
     $('selectedDateTitle').textContent = `${selectedCalendarDate} · ${person}`;
     const items = records.filter(r => r.person === person && r.date === selectedCalendarDate);
-    $('selectedDateItems').innerHTML = items.length ? items.map(r => `<div class="cal-item"><span class="type-tag tag-${typeInfo(r.type).key}">${esc(r.type)}</span><div><b>${esc(r.customer)}${r.project ? ` · ${esc(r.project)}` : ''}</b><small>${esc(r.description)}${r.hours ? ` · ${esc(r.hours)} 小时` : ''}</small></div></div>`).join('') : '<div class="cal-empty">当天没有已登记的服务任务。</div>';
+    const serviceHtml = items.map(r => `<div class="cal-item"><span class="type-tag tag-${typeInfo(r.type).key}">${esc(r.type)}</span><div><b>${esc(r.customer)}${r.project ? ` · ${esc(r.project)}` : ''}</b><small>${esc(r.description)}${r.hours ? ` · ${esc(r.hours)} 小时` : ''}</small></div></div>`);
+    $('selectedDateItems').innerHTML = serviceHtml.join('') || '<div class="cal-empty">当天没有已登记服务。</div>';
   }
   function openModal(id) {
     $('recordForm').reset(); $('recordId').value = ''; $('date').value = today(); $('status').value = '待处理';
-    $('modalTitle').textContent = id ? '编辑服务记录' : '新建服务记录';
+    $('modalTitle').textContent = id ? '编辑上门服务单' : '新建上门服务单';
     if (id) {
       const record = records.find(r => r.id === id); if (!record) return;
-      for (const key of ['date', 'type', 'person', 'customer', 'project', 'sales', 'location', 'channel', 'equipment', 'quantity', 'hours', 'status', 'description', 'result']) $(key).value = record[key] ?? '';
+      for (const key of ['date', 'type', 'person', 'customer', 'project', 'sales', 'location', 'channel', 'equipment', 'quantity', 'hours', 'status', 'description', 'result', 'contact_name', 'contact_phone', 'service_time', 'problem', 'parts', 'follow_up']) $(key).value = record[key] ?? '';
       $('recordId').value = id;
     }
+    updateServiceFields();
     $('modalBack').classList.add('open');
   }
+  function updateServiceFields() {
+    const delivery = $('type').value === '上门送货';
+    const onsite = delivery || $('type').value === '上门维护';
+    $('problemField').hidden = delivery;
+    $('parts').closest('label').hidden = delivery;
+    $('problem').required = $('type').value === '上门维护';
+    $('equipmentField').hidden = !delivery;
+    $('quantityField').hidden = !delivery;
+    $('equipment').required = delivery;
+    $('quantity').required = delivery;
+    $('location').required = onsite;
+    $('service_time').required = onsite;
+    $('hours').required = $('status').value === '已完成';
+  }
+  $('type').addEventListener('change', updateServiceFields);
+  $('status').addEventListener('change', updateServiceFields);
   function closeModal() { $('modalBack').classList.remove('open'); }
   async function reloadRecords() { records = await request('/api/records'); render(); }
 
@@ -107,14 +125,15 @@
   $('recordForm').onsubmit = async event => {
     event.preventDefault();
     const id = $('recordId').value, body = {};
-    for (const key of ['date', 'type', 'person', 'customer', 'project', 'sales', 'location', 'channel', 'equipment', 'quantity', 'hours', 'status', 'description', 'result']) body[key] = $(key).value.trim();
+    for (const key of ['date', 'type', 'person', 'customer', 'project', 'sales', 'location', 'channel', 'equipment', 'quantity', 'hours', 'status', 'description', 'result', 'contact_name', 'contact_phone', 'service_time', 'problem', 'parts', 'follow_up']) body[key] = $(key).value.trim();
     try {
       await request(id ? `/api/records/${encodeURIComponent(id)}` : '/api/records', { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) });
       closeModal(); await reloadRecords(); toast(id ? '记录已更新' : '服务记录已保存');
     } catch (error) { toast(error.message); }
   };
   $('tbody').onclick = async event => {
-    const edit = event.target.closest('[data-edit]'), remove = event.target.closest('[data-delete]');
+    const edit = event.target.closest('[data-edit]'), remove = event.target.closest('[data-delete]'), print = event.target.closest('[data-print]');
+    if (print) printRecord(records.find(r => r.id === print.dataset.print));
     if (edit) openModal(edit.dataset.edit);
     if (remove && confirm('确定删除这条服务记录吗？')) {
       try { await request(`/api/records/${encodeURIComponent(remove.dataset.delete)}`, { method: 'DELETE' }); await reloadRecords(); toast('记录已删除'); }
@@ -132,11 +151,17 @@
   $('nextMonth').onclick = () => { calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1); selectedCalendarDate = localDate(calendarMonth); renderCalendar(); };
   $('calendarGrid').onclick = event => { const cell = event.target.closest('[data-calendar-date]'); if (!cell) return; selectedCalendarDate = cell.dataset.calendarDate; const date = new Date(`${selectedCalendarDate}T12:00:00`); calendarMonth = new Date(date.getFullYear(), date.getMonth(), 1); renderCalendar(); };
   $('exportBtn').onclick = () => {
-    const rows = [['服务日期', '服务类型', '处理人员', '用户/单位', '所属项目', '负责销售', '服务地点', '服务渠道', '设备/配件', '数量', '用时(小时)', '状态', '服务内容', '处理结果'], ...records.map(r => ['date', 'type', 'person', 'customer', 'project', 'sales', 'location', 'channel', 'equipment', 'quantity', 'hours', 'status', 'description', 'result'].map(k => r[k] || ''))];
+    const rows = [['服务日期', '服务类型', '处理人员', '用户/单位', '所属项目', '负责销售', '服务地点', '现场联系人', '联系电话', '到访时间', '服务渠道', '设备型号与数量', '设备总数', '用时(小时)', '状态', '故障/需求', '服务内容', '更换配件', '处理结果', '后续跟进'], ...records.map(r => ['date', 'type', 'person', 'customer', 'project', 'sales', 'location', 'contact_name', 'contact_phone', 'service_time', 'channel', 'equipment', 'quantity', 'hours', 'status', 'problem', 'description', 'parts', 'result', 'follow_up'].map(k => r[k] || ''))];
     const csv = '\ufeff' + rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })), link = document.createElement('a');
     link.href = url; link.download = `售后服务记录_${today()}.csv`; link.click(); URL.revokeObjectURL(url); toast('已导出 CSV');
   };
+  function printRecord(record) {
+    if (!record) return;
+    const field = (label, value) => `<div><b>${label}：</b>${esc(value || '—')}</div>`;
+    $('printArea').innerHTML = `<h1>售后上门服务单</h1><div class="print-meta">${field('单据类型', record.type)}${field('服务日期', record.date)}${field('主处理工程师', record.person)}${field('状态', record.status)}${field('用户 / 单位', record.customer)}${field('所属项目', record.project)}${field('负责销售', record.sales)}${field('服务地点', record.location)}${field('现场联系人', record.contact_name)}${field('联系电话', record.contact_phone)}${field('到访时间', record.service_time)}${field('投入工时', `${record.hours || 0} 小时`)}${field('设备总数', record.quantity)}${field('服务渠道', record.channel)}</div><h2>设备型号与数量</h2><div class="print-content">${esc(record.equipment || '—')}</div><h2>故障 / 用户需求</h2><div class="print-content">${esc(record.problem || '—')}</div><h2>服务内容</h2><div class="print-content">${esc(record.description || '—')}</div><h2>更换配件</h2><div class="print-content">${esc(record.parts || '—')}</div><h2>处理结果 / 用户确认</h2><div class="print-content">${esc(record.result || '—')}</div><h2>后续跟进</h2><div class="print-content">${esc(record.follow_up || '—')}</div><div class="signatures"><span>工程师签字：</span><span>用户确认：</span></div>`;
+    window.print();
+  }
   $('logoutBtn').onclick = async () => { await request('/api/logout', { method: 'POST', body: '{}' }); location.href = '/login'; };
   reloadRecords().catch(error => toast(error.message));
 })();
