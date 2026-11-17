@@ -85,9 +85,11 @@
     renderCalendar(); renderInstitutions();
   }
   function renderInstitutions() {
-    $('customerSuggestions').innerHTML = institutions.filter(i => i.status === '在用').flatMap(i => [i.name, ...String(i.aliases || '').split(/[、；;,，]/).map(x => x.trim()).filter(Boolean)]).map(name => `<option value="${esc(name)}"></option>`).join('');
+    const byRecentService = items => [...items].sort((a, b) => (b.last_service_date || '').localeCompare(a.last_service_date || '') || (Number(b.service_count) || 0) - (Number(a.service_count) || 0) || a.name.localeCompare(b.name, 'zh-CN'));
+    const recentlyUsed = byRecentService(institutions);
+    $('customerSuggestions').innerHTML = recentlyUsed.filter(i => i.status === '在用').flatMap(i => [i.name, ...String(i.aliases || '').split(/[、；;,，]/).map(x => x.trim()).filter(Boolean)]).map(name => `<option value="${esc(name)}"></option>`).join('');
     const query = $('institutionSearch').value.trim().toLowerCase(), kind = $('institutionKindFilter').value, status = $('institutionStatusFilter').value;
-    const list = institutions.filter(i => (!kind || i.kind === kind) && (!status || i.status === status) && (!query || [i.name, i.aliases, i.district, i.address, i.contact_name, i.contact_phone].join(' ').toLowerCase().includes(query)));
+    const list = byRecentService(institutions.filter(i => (!kind || i.kind === kind) && (!status || i.status === status) && (!query || [i.name, i.aliases, i.district, i.address, i.contact_name, i.contact_phone].join(' ').toLowerCase().includes(query))));
     const universities = institutions.filter(i => i.kind === '高校').length, institutes = institutions.filter(i => i.kind !== '高校').length;
     $('institutionCount').textContent = `共 ${institutions.length} 家单位：高校 ${universities} 家，科研院所及平台 ${institutes} 家`;
     $('institutionEmpty').hidden = list.length > 0;
