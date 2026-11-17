@@ -21,7 +21,8 @@ DATA_DIR = ROOT / "data"
 DB_PATH = DATA_DIR / "ass.db"
 COOKIE = "ass_session"
 SESSION_SECONDS = 60 * 60 * 24 * 14
-FIELDS = ("date", "type", "person", "customer", "project", "sales", "location", "channel", "equipment", "quantity", "hours", "status", "description", "result", "contact_name", "contact_phone", "service_time", "problem", "parts", "follow_up")
+FIELDS = ("date", "type", "person", "customer", "project", "sales", "location", "channel", "equipment", "quantity", "hours", "status", "description", "result", "contact_name", "contact_phone", "service_time", "problem", "parts", "follow_up", "source")
+INSTITUTION_FIELDS = ("name", "aliases", "kind", "district", "address", "contact_name", "contact_phone", "website", "source", "notes", "status")
 
 
 def connect():
@@ -32,6 +33,14 @@ def connect():
     db.execute("CREATE TABLE IF NOT EXISTS admin (id INTEGER PRIMARY KEY CHECK (id=1), username TEXT UNIQUE NOT NULL, password_hash BLOB NOT NULL, salt BLOB NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS sessions (token_hash BLOB PRIMARY KEY, expires_at INTEGER NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL)")
+    db.execute("CREATE TABLE IF NOT EXISTS institutions (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, aliases TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, district TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '', contact_name TEXT NOT NULL DEFAULT '', contact_phone TEXT NOT NULL DEFAULT '', website TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '在用', updated_at INTEGER NOT NULL)")
+    db.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    if not db.execute("SELECT 1 FROM app_state WHERE key='institutions_seeded'").fetchone():
+        seed_file = ROOT / "institution_seed.json"
+        if seed_file.exists():
+            for institution in json.loads(seed_file.read_text(encoding="utf-8")):
+                db.execute("INSERT OR IGNORE INTO institutions(name,aliases,kind,source,updated_at) VALUES(?,?,?,?,?)", (institution["name"], institution.get("aliases", ""), institution["kind"], institution.get("source", ""), int(time.time())))
+        db.execute("INSERT INTO app_state(key,value) VALUES('institutions_seeded','1')")
     db.commit()
     os.chmod(DATA_DIR, 0o700)
     os.chmod(DB_PATH, 0o600)
@@ -61,6 +70,17 @@ def clean_record(data):
         raise ValueError("上门维护单请填写服务地点、到访时间和故障/用户需求")
     if out["status"] == "已完成" and (not out["hours"] or float(out["hours"]) <= 0):
         raise ValueError("完成服务时请填写工程师投入工时")
+    return out
+
+
+def clean_institution(data):
+    if not isinstance(data, dict):
+        raise ValueError("单位档案格式无效")
+    out = {key: str(data.get(key, "")).strip() for key in INSTITUTION_FIELDS}
+    if not out["name"] or out["kind"] not in ("高校", "科研院所", "科研平台/实验室", "其他"):
+        raise ValueError("单位名称和有效的单位类型为必填项")
+    if out["status"] not in ("在用", "停用"):
+        out["status"] = "在用"
     return out
 
 
@@ -126,6 +146,31 @@ class Handler(BaseHTTPRequestHandler):
                 records = [json.loads(r[0]) for r in db.execute("SELECT payload FROM records ORDER BY json_extract(payload,'$.date') DESC, updated_at DESC")]
                 self.json(200, records)
                 return
+            if path == "/api/institutions":
+                if not self.session(db):
+                    self.json(401, {"error": "请先登录"})
+                    return
+                name_lookup = {}
+                rows = db.execute("SELECT id,name,aliases,kind,district,address,contact_name,contact_phone,website,source,notes,status FROM institutions ORDER BY kind,name").fetchall()
+                for row in rows:
+                    for value in [row["name"], *re.split(r"[、；;,，]", row["aliases"])]:
+                        if value.strip():
+                            name_lookup[value.strip()] = row["name"]
+                activity = {}
+                for row in db.execute("SELECT payload FROM records"):
+                    record = json.loads(row[0])
+                    name = name_lookup.get(record.get("customer", ""), record.get("customer", ""))
+                    if name:
+                        summary = activity.setdefault(name, {"service_count": 0, "last_service_date": ""})
+                        summary["service_count"] += 1
+                        summary["last_service_date"] = max(summary["last_service_date"], record.get("date", ""))
+                institutions = []
+                for row in rows:
+                    institution = dict(row)
+                    institution.update(activity.get(institution["name"], {"service_count": 0, "last_service_date": ""}))
+                    institutions.append(institution)
+                self.json(200, institutions)
+                return
             if path == "/login" or path == "/login.html":
                 self.send_bytes(200, (ROOT / "login.html").read_bytes(), "text/html; charset=utf-8")
                 return
@@ -177,6 +222,23 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/logout":
                 self.json(200, {"ok": True}, {"Set-Cookie": self.clear_session(db)})
                 return
+            if path == "/api/institutions":
+                if not self.session(db):
+                    self.json(401, {"error": "登录状态已失效"})
+                    return
+                try:
+                    institution = clean_institution(data)
+                    cur = db.execute("INSERT INTO institutions(name,aliases,kind,district,address,contact_name,contact_phone,website,source,notes,status,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (*[institution[key] for key in INSTITUTION_FIELDS], int(time.time())))
+                except sqlite3.IntegrityError:
+                    self.json(409, {"error": "该单位名称已存在"})
+                    return
+                except ValueError as exc:
+                    self.json(400, {"error": str(exc)})
+                    return
+                db.commit()
+                institution["id"] = cur.lastrowid
+                self.json(201, institution)
+                return
             if path == "/api/records":
                 if not self.session(db):
                     self.json(401, {"error": "登录状态已失效"})
@@ -194,7 +256,44 @@ class Handler(BaseHTTPRequestHandler):
         self.json(404, {"error": "接口不存在"})
 
     def do_PUT(self):
-        self.save_record(update=True)
+        if urlparse(self.path).path.startswith("/api/institutions/"):
+            self.save_institution()
+        else:
+            self.save_record(update=True)
+
+    def save_institution(self):
+        match = re.fullmatch(r"/api/institutions/(\d+)", urlparse(self.path).path)
+        if not match:
+            self.json(404, {"error": "单位档案不存在"})
+            return
+        with connect() as db:
+            if not self.session(db):
+                self.json(401, {"error": "登录状态已失效"})
+                return
+            try:
+                institution = clean_institution(self.read_json())
+            except (ValueError, json.JSONDecodeError) as exc:
+                self.json(400, {"error": str(exc) or "请求内容无效"})
+                return
+            existing = db.execute("SELECT name,aliases FROM institutions WHERE id=?", (match.group(1),)).fetchone()
+            if not existing:
+                self.json(404, {"error": "单位档案不存在"})
+                return
+            try:
+                db.execute("UPDATE institutions SET name=?,aliases=?,kind=?,district=?,address=?,contact_name=?,contact_phone=?,website=?,source=?,notes=?,status=?,updated_at=? WHERE id=?", (*[institution[key] for key in INSTITUTION_FIELDS], int(time.time()), match.group(1)))
+            except sqlite3.IntegrityError:
+                self.json(409, {"error": "该单位名称已存在"})
+                return
+            if existing["name"] != institution["name"]:
+                old_names = {existing["name"], *[x.strip() for x in re.split(r"[、；;,，]", existing["aliases"]) if x.strip()]}
+                for row in db.execute("SELECT id,payload FROM records").fetchall():
+                    record = json.loads(row["payload"])
+                    if record.get("customer") in old_names:
+                        record["customer"] = institution["name"]
+                        db.execute("UPDATE records SET payload=? WHERE id=?", (json.dumps(record, ensure_ascii=False), row["id"]))
+            db.commit()
+            institution["id"] = int(match.group(1))
+            self.json(200, institution)
 
     def save_record(self, update=False):
         match = re.fullmatch(r"/api/records/([A-Za-z0-9_-]{10,64})", urlparse(self.path).path)

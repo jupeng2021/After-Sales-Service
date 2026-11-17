@@ -9,6 +9,7 @@
     { name: '远程服务', key: 'remote' }, { name: '驻场服务', key: 'resident' }, { name: '大型项目', key: 'project' }
   ];
   let records = [];
+  let institutions = [];
   let calendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   let selectedCalendarDate = today();
   const $ = id => document.getElementById(id);
@@ -72,12 +73,22 @@
     const startLabel = $('rangeStart').value || '开始不限', endLabel = $('rangeEnd').value || '至今';
     $('workloadCaption').textContent = `统计范围：${startLabel} 至 ${endLabel}；任务按单据中的主处理工程师统计`;
     const query = $('search').value.trim().toLowerCase(), type = $('filterType').value, person = $('filterPerson').value, status = $('filterStatus').value;
-    const list = records.filter(r => (!type || r.type === type) && (!person || r.person === person) && (!status || r.status === status) && (!query || [r.customer, r.project, r.description, r.result, r.person, r.location].join(' ').toLowerCase().includes(query))).sort((a, b) => b.date.localeCompare(a.date));
+    const list = records.filter(r => (!type || r.type === type) && (!person || r.person === person) && (!status || r.status === status) && (!query || [r.customer, r.project, r.description, r.result, r.person, r.location, r.source].join(' ').toLowerCase().includes(query))).sort((a, b) => b.date.localeCompare(a.date));
     $('recordCount').textContent = `共 ${list.length} 条记录`;
     $('empty').hidden = list.length > 0;
     $('tbody').innerHTML = list.map(r => `<tr><td>${esc(r.date)}${r.service_time ? `<div class="muted">${esc(r.service_time)}</div>` : ''}</td><td><span class="type-tag tag-${typeInfo(r.type).key}">${esc(r.type)}</span></td><td><b>${esc(r.customer)}</b><div class="muted">${esc(r.project || '未关联项目')}</div></td><td>${esc(r.person)}</td><td title="${esc(r.description)}">${esc(r.description.length > 34 ? r.description.slice(0, 34) + '…' : r.description)}</td><td>${Number(r.hours || 0) || '—'} 小时</td><td><span class="status ${r.status === '已完成' ? 'done' : r.status === '处理中' ? 'processing' : 'pending'}">${esc(r.status)}</span></td><td><div class="row-actions"><button class="link-btn" data-print="${esc(r.id)}">打印</button><button class="link-btn" data-edit="${esc(r.id)}">编辑</button><button class="link-btn delete" data-delete="${esc(r.id)}">删除</button></div></td></tr>`).join('');
-    renderCalendar();
+    renderCalendar(); renderInstitutions();
   }
+  function renderInstitutions() {
+    $('customerSuggestions').innerHTML = institutions.filter(i => i.status === '在用').flatMap(i => [i.name, ...String(i.aliases || '').split(/[、；;,，]/).map(x => x.trim()).filter(Boolean)]).map(name => `<option value="${esc(name)}"></option>`).join('');
+    const query = $('institutionSearch').value.trim().toLowerCase(), kind = $('institutionKindFilter').value, status = $('institutionStatusFilter').value;
+    const list = institutions.filter(i => (!kind || i.kind === kind) && (!status || i.status === status) && (!query || [i.name, i.aliases, i.district, i.address, i.contact_name, i.contact_phone].join(' ').toLowerCase().includes(query)));
+    const universities = institutions.filter(i => i.kind === '高校').length, institutes = institutions.filter(i => i.kind !== '高校').length;
+    $('institutionCount').textContent = `共 ${institutions.length} 家单位：高校 ${universities} 家，科研院所及平台 ${institutes} 家`;
+    $('institutionEmpty').hidden = list.length > 0;
+    $('institutionBody').innerHTML = list.map(i => `<tr><td><b>${esc(i.name)}</b><div class="muted">${esc(i.aliases || i.contact_name || '暂无联系人')}</div></td><td>${esc(i.kind)}</td><td>${esc(i.district || '—')}</td><td>${i.service_count || 0}</td><td>${esc(i.last_service_date || '—')}</td><td><span class="status ${i.status === '在用' ? 'done' : 'pending'}">${esc(i.status)}</span></td><td><button class="link-btn" data-institution="${i.id}">打开档案</button></td></tr>`).join('');
+  }
+  async function reloadInstitutions() { institutions = await request('/api/institutions'); renderInstitutions(); }
   function localDate(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
   function renderCalendar() {
     const person = $('calendarPerson').value || people[0].name, year = calendarMonth.getFullYear(), month = calendarMonth.getMonth();
@@ -105,39 +116,85 @@
     $('modalTitle').textContent = id ? '编辑上门服务单' : '新建上门服务单';
     if (id) {
       const record = records.find(r => r.id === id); if (!record) return;
-      for (const key of ['date', 'type', 'person', 'customer', 'project', 'sales', 'location', 'channel', 'equipment', 'quantity', 'hours', 'status', 'description', 'result', 'contact_name', 'contact_phone', 'service_time', 'problem', 'parts', 'follow_up']) $(key).value = record[key] ?? '';
+      for (const key of ['date', 'type', 'person', 'source', 'customer', 'project', 'sales', 'location', 'channel', 'equipment', 'quantity', 'hours', 'status', 'description', 'result', 'contact_name', 'contact_phone', 'service_time', 'problem', 'parts', 'follow_up']) $(key).value = record[key] ?? '';
+      $('channel').dataset.saved = record.channel || '';
       $('recordId').value = id;
-    }
+    } else { $('channel').dataset.saved = ''; $('channel').value = ''; }
     updateServiceFields();
     $('modalBack').classList.add('open');
   }
   function updateServiceFields() {
-    const delivery = $('type').value === '上门送货';
-    const onsite = delivery || $('type').value === '上门维护';
+    const type = $('type').value, delivery = type === '上门送货', maintenance = type === '上门维护';
+    const remote = type === '远程服务', resident = type === '驻场服务', onsite = delivery || maintenance;
+    const labels = { '上门送货': '新建上门送货单', '上门维护': '新建上门维护单', '远程服务': '新建远程服务单', '驻场服务': '新建驻场任务单', '大型项目': '新建项目服务记录' };
+    $('modalTitle').textContent = `${$('recordId').value ? '编辑' : '新建'}${(labels[type] || '服务单').replace(/^新建/, '')}`;
     $('problemField').hidden = delivery;
-    $('parts').closest('label').hidden = delivery;
-    $('problem').required = $('type').value === '上门维护';
+    $('parts').closest('label').hidden = !maintenance;
+    $('problem').required = maintenance || remote || resident || type === '大型项目';
     $('equipmentField').hidden = !delivery;
     $('quantityField').hidden = !delivery;
     $('equipment').required = delivery;
     $('quantity').required = delivery;
     $('location').required = onsite;
+    $('locationField').hidden = !(onsite || resident || type === '大型项目');
+    $('contactNameField').hidden = !onsite;
+    $('contactPhoneField').hidden = !onsite;
     $('service_time').required = onsite;
+    $('serviceTimeLabel').textContent = delivery ? '送达时间' : maintenance ? '到访时间' : remote ? '处理时间' : resident ? '任务时间' : '服务时间';
+    $('locationField').firstChild.textContent = delivery ? '送达地址' : resident ? '驻场地点' : '上门地点';
+    $('problemLabel').textContent = maintenance ? '故障现象 / 用户需求' : remote ? '远程问题 / 用户需求' : resident ? '驻场任务内容' : '问题 / 项目任务';
+    const channels = remote ? ['VPN', '向日葵', '电话', '工作群', '其他'] : resident ? ['现场处理', '远程协助', '电话', '其他'] : type === '大型项目' ? ['现场处理', 'VPN', '向日葵', '其他'] : ['现场处理', '电话', '其他'];
+    const previousChannel = $('channel').value || $('channel').dataset.saved || '';
+    const channelOptions = channels.includes(previousChannel) ? channels : [...channels, ...(previousChannel ? [previousChannel] : [])];
+    $('channel').innerHTML = channelOptions.map(channel => `<option>${esc(channel)}</option>`).join('');
+    $('channel').value = previousChannel || channels[0];
     $('hours').required = $('status').value === '已完成';
   }
-  $('type').addEventListener('change', updateServiceFields);
+  $('type').addEventListener('change', () => { $('channel').dataset.saved = ''; updateServiceFields(); });
   $('status').addEventListener('change', updateServiceFields);
   function closeModal() { $('modalBack').classList.remove('open'); }
+  function openInstitutionModal(id) {
+    $('institutionForm').reset(); $('institutionId').value = '';
+    $('institutionModalTitle').textContent = id ? '单位档案' : '新增单位档案';
+    const institution = id ? institutions.find(i => String(i.id) === String(id)) : null;
+    if (id && !institution) return;
+    if (institution) {
+      for (const [field, key] of [['instName','name'],['instAliases','aliases'],['instKind','kind'],['instDistrict','district'],['instStatus','status'],['instAddress','address'],['instContact','contact_name'],['instPhone','contact_phone'],['instWebsite','website'],['instSource','source'],['instNotes','notes']]) $(field).value = institution[key] || '';
+      $('institutionId').value = institution.id;
+      const institutionNames = new Set([institution.name, ...String(institution.aliases || '').split(/[、；;,，]/).map(x => x.trim()).filter(Boolean)]);
+      const history = records.filter(r => institutionNames.has(r.customer)).sort((a,b) => b.date.localeCompare(a.date)).slice(0,10);
+      $('institutionHistory').hidden = false;
+      $('institutionHistory').innerHTML = `<h3>关联服务记录（${institution.service_count || 0}）</h3>${history.length ? history.map(r => `<div class="institution-history-row"><b>${esc(r.date)} · ${esc(r.type)} · ${esc(r.person)}</b><span>${esc(r.description)}${r.hours ? ` · ${esc(r.hours)} 小时` : ''}</span></div>`).join('') : '<div class="muted">还没有与该单位名称匹配的服务记录。</div>'}`;
+    } else {
+      $('instKind').value = '高校'; $('instStatus').value = '在用'; $('institutionHistory').hidden = true; $('institutionHistory').innerHTML = '';
+    }
+    $('institutionModalBack').classList.add('open');
+  }
+  function closeInstitutionModal() { $('institutionModalBack').classList.remove('open'); }
   async function reloadRecords() { records = await request('/api/records'); render(); }
 
   $('addBtn').onclick = () => openModal();
   $('closeModal').onclick = $('cancelBtn').onclick = closeModal;
   $('modalBack').onclick = event => { if (event.target === $('modalBack')) closeModal(); };
-  document.onkeydown = event => { if (event.key === 'Escape') closeModal(); };
+  document.onkeydown = event => { if (event.key === 'Escape') { closeModal(); closeInstitutionModal(); } };
+  $('addInstitutionBtn').onclick = () => openInstitutionModal();
+  $('closeInstitutionModal').onclick = $('cancelInstitutionBtn').onclick = closeInstitutionModal;
+  $('institutionModalBack').onclick = event => { if (event.target === $('institutionModalBack')) closeInstitutionModal(); };
+  $('institutionBody').onclick = event => { const button = event.target.closest('[data-institution]'); if (button) openInstitutionModal(button.dataset.institution); };
+  $('institutionForm').onsubmit = async event => {
+    event.preventDefault();
+    const id = $('institutionId').value;
+    const body = { name: $('instName').value.trim(), aliases: $('instAliases').value.trim(), kind: $('instKind').value, district: $('instDistrict').value, status: $('instStatus').value, address: $('instAddress').value.trim(), contact_name: $('instContact').value.trim(), contact_phone: $('instPhone').value.trim(), website: $('instWebsite').value.trim(), source: $('instSource').value.trim(), notes: $('instNotes').value.trim() };
+    try {
+      await request(id ? `/api/institutions/${encodeURIComponent(id)}` : '/api/institutions', { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) });
+      closeInstitutionModal(); await Promise.all([reloadInstitutions(), reloadRecords()]); toast(id ? '单位档案已更新' : '单位档案已建立');
+    } catch (error) { toast(error.message); }
+  };
+  for (const id of ['institutionSearch', 'institutionKindFilter', 'institutionStatusFilter']) $(id).addEventListener(id === 'institutionSearch' ? 'input' : 'change', renderInstitutions);
   $('recordForm').onsubmit = async event => {
     event.preventDefault();
     const id = $('recordId').value, body = {};
-    for (const key of ['date', 'type', 'person', 'customer', 'project', 'sales', 'location', 'channel', 'equipment', 'quantity', 'hours', 'status', 'description', 'result', 'contact_name', 'contact_phone', 'service_time', 'problem', 'parts', 'follow_up']) body[key] = $(key).value.trim();
+    for (const key of ['date', 'type', 'person', 'source', 'customer', 'project', 'sales', 'location', 'channel', 'equipment', 'quantity', 'hours', 'status', 'description', 'result', 'contact_name', 'contact_phone', 'service_time', 'problem', 'parts', 'follow_up']) body[key] = $(key).value.trim();
     try {
       await request(id ? `/api/records/${encodeURIComponent(id)}` : '/api/records', { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) });
       closeModal(); await reloadRecords(); toast(id ? '记录已更新' : '服务记录已保存');
@@ -157,15 +214,16 @@
   for (const id of ['filterType', 'filterPerson', 'filterStatus']) $(id).addEventListener('change', render);
   $('search').addEventListener('input', render);
   function setNav(button) { document.querySelectorAll('.nav button').forEach(item => item.classList.remove('active')); button.classList.add('active'); }
-  $('navRecords').onclick = () => { setNav($('navRecords')); $('calendarPanel').hidden = true; $('recordsPanel').scrollIntoView({ behavior: 'smooth' }); };
-  $('navCalendar').onclick = () => { setNav($('navCalendar')); $('calendarPanel').hidden = false; renderCalendar(); $('calendarPanel').scrollIntoView({ behavior: 'smooth' }); };
-  $('navOverview').onclick = () => { setNav($('navOverview')); $('calendarPanel').hidden = true; window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  $('navRecords').onclick = () => { setNav($('navRecords')); $('calendarPanel').hidden = true; $('institutionsPanel').hidden = true; $('recordsPanel').scrollIntoView({ behavior: 'smooth' }); };
+  $('navCalendar').onclick = () => { setNav($('navCalendar')); $('institutionsPanel').hidden = true; $('calendarPanel').hidden = false; renderCalendar(); $('calendarPanel').scrollIntoView({ behavior: 'smooth' }); };
+  $('navOverview').onclick = () => { setNav($('navOverview')); $('calendarPanel').hidden = true; $('institutionsPanel').hidden = true; window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  $('navInstitutions').onclick = () => { setNav($('navInstitutions')); $('calendarPanel').hidden = true; $('institutionsPanel').hidden = false; renderInstitutions(); $('institutionsPanel').scrollIntoView({ behavior: 'smooth' }); };
   $('calendarPerson').addEventListener('change', renderCalendar);
   $('prevMonth').onclick = () => { calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1); selectedCalendarDate = localDate(calendarMonth); renderCalendar(); };
   $('nextMonth').onclick = () => { calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1); selectedCalendarDate = localDate(calendarMonth); renderCalendar(); };
   $('calendarGrid').onclick = event => { const cell = event.target.closest('[data-calendar-date]'); if (!cell) return; selectedCalendarDate = cell.dataset.calendarDate; const date = new Date(`${selectedCalendarDate}T12:00:00`); calendarMonth = new Date(date.getFullYear(), date.getMonth(), 1); renderCalendar(); };
   $('exportBtn').onclick = () => {
-    const rows = [['服务日期', '服务类型', '处理人员', '用户/单位', '所属项目', '负责销售', '服务地点', '现场联系人', '联系电话', '到访时间', '服务渠道', '设备型号与数量', '设备总数', '用时(小时)', '状态', '故障/需求', '服务内容', '更换配件', '处理结果', '后续跟进'], ...records.map(r => ['date', 'type', 'person', 'customer', 'project', 'sales', 'location', 'contact_name', 'contact_phone', 'service_time', 'channel', 'equipment', 'quantity', 'hours', 'status', 'problem', 'description', 'parts', 'result', 'follow_up'].map(k => r[k] || ''))];
+    const rows = [['服务日期', '服务类型', '处理人员', '任务来源', '用户/单位', '所属项目', '负责销售', '服务地点', '现场联系人', '联系电话', '服务时间', '服务渠道', '设备型号与数量', '设备总数', '用时(小时)', '状态', '故障/需求/任务', '服务内容', '更换配件', '处理结果', '后续跟进'], ...records.map(r => ['date', 'type', 'person', 'source', 'customer', 'project', 'sales', 'location', 'contact_name', 'contact_phone', 'service_time', 'channel', 'equipment', 'quantity', 'hours', 'status', 'problem', 'description', 'parts', 'result', 'follow_up'].map(k => r[k] || ''))];
     const csv = '\ufeff' + rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })), link = document.createElement('a');
     link.href = url; link.download = `售后服务记录_${today()}.csv`; link.click(); URL.revokeObjectURL(url); toast('已导出 CSV');
@@ -183,9 +241,9 @@
   function printRecord(record) {
     if (!record) return;
     const field = (label, value) => `<div><b>${label}：</b>${esc(value || '—')}</div>`;
-    $('printArea').innerHTML = `<h1>售后上门服务单</h1><div class="print-meta">${field('单据类型', record.type)}${field('服务日期', record.date)}${field('主处理工程师', record.person)}${field('状态', record.status)}${field('用户 / 单位', record.customer)}${field('所属项目', record.project)}${field('负责销售', record.sales)}${field('服务地点', record.location)}${field('现场联系人', record.contact_name)}${field('联系电话', record.contact_phone)}${field('到访时间', record.service_time)}${field('投入工时', `${record.hours || 0} 小时`)}${field('设备总数', record.quantity)}${field('服务渠道', record.channel)}</div><h2>设备型号与数量</h2><div class="print-content">${esc(record.equipment || '—')}</div><h2>故障 / 用户需求</h2><div class="print-content">${esc(record.problem || '—')}</div><h2>服务内容</h2><div class="print-content">${esc(record.description || '—')}</div><h2>更换配件</h2><div class="print-content">${esc(record.parts || '—')}</div><h2>处理结果 / 用户确认</h2><div class="print-content">${esc(record.result || '—')}</div><h2>后续跟进</h2><div class="print-content">${esc(record.follow_up || '—')}</div><div class="signatures"><span>工程师签字：</span><span>用户确认：</span></div>`;
+    $('printArea').innerHTML = `<h1>售后服务单</h1><div class="print-meta">${field('单据类型', record.type)}${field('服务日期', record.date)}${field('主处理工程师', record.person)}${field('任务来源', record.source)}${field('状态', record.status)}${field('用户 / 单位', record.customer)}${field('所属项目', record.project)}${field('负责销售', record.sales)}${field('服务地点', record.location)}${field('现场联系人', record.contact_name)}${field('联系电话', record.contact_phone)}${field('服务时间', record.service_time)}${field('投入工时', `${record.hours || 0} 小时`)}${field('设备总数', record.quantity)}${field('服务渠道', record.channel)}</div><h2>设备型号与数量</h2><div class="print-content">${esc(record.equipment || '—')}</div><h2>故障 / 用户需求 / 任务内容</h2><div class="print-content">${esc(record.problem || '—')}</div><h2>服务内容</h2><div class="print-content">${esc(record.description || '—')}</div><h2>更换配件</h2><div class="print-content">${esc(record.parts || '—')}</div><h2>处理结果 / 用户确认</h2><div class="print-content">${esc(record.result || '—')}</div><h2>后续跟进</h2><div class="print-content">${esc(record.follow_up || '—')}</div><div class="signatures"><span>工程师签字：</span><span>用户确认：</span></div>`;
     window.print();
   }
   $('logoutBtn').onclick = async () => { await request('/api/logout', { method: 'POST', body: '{}' }); location.href = '/login'; };
-  reloadRecords().catch(error => toast(error.message));
+  Promise.all([reloadRecords(), reloadInstitutions()]).catch(error => toast(error.message));
 })();
