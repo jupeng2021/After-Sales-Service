@@ -22,7 +22,7 @@ DB_PATH = DATA_DIR / "ass.db"
 COOKIE = "ass_session"
 SESSION_SECONDS = 60 * 60 * 24 * 14
 TEAM = ("陈巨鹏", "肖林", "洪凯")
-FIELDS = ("date", "type", "person", "customer", "project", "sales", "location", "channel", "equipment", "quantity", "hours", "status", "description", "result", "contact_name", "contact_phone", "service_time", "problem", "parts", "follow_up", "source")
+FIELDS = ("date", "type", "person", "customer", "project", "sales", "location", "channel", "equipment", "quantity", "hours", "status", "description", "result", "contact_name", "contact_phone", "service_time", "problem", "parts", "follow_up", "source", "internal_category")
 INSTITUTION_FIELDS = ("name", "aliases", "kind", "district", "address", "contact_name", "contact_phone", "website", "source", "notes", "status")
 
 
@@ -56,8 +56,8 @@ def clean_record(data):
     if not isinstance(data, dict):
         raise ValueError("记录格式无效")
     out = {k: str(data.get(k, "")).strip() for k in FIELDS}
-    if not out["date"] or not out["type"] or not out["person"] or not out["customer"] or not out["description"]:
-        raise ValueError("日期、类型、处理人员、用户/单位和服务内容为必填项")
+    if not out["date"] or not out["type"] or not out["person"] or not out["description"] or (out["type"] != "公司内部工作" and not out["customer"]):
+        raise ValueError("日期、类型、处理人员、用户/单位和服务内容为必填项；公司内部工作可不填用户/单位")
     if out["person"] not in TEAM:
         raise ValueError("主处理工程师不在成员名单中")
     try:
@@ -88,6 +88,10 @@ def clean_record(data):
         raise ValueError("上门送货单请填写送达地址、送达时间、设备型号和数量")
     if out["type"] == "上门维护" and not all(out[key] for key in ("location", "service_time", "problem")):
         raise ValueError("上门维护单请填写服务地点、到访时间和故障/用户需求")
+    if out["type"] == "公司内部工作" and out["internal_category"] not in ("设备测试", "设备安装 / 系统部署", "运输 / 发货准备", "配置 / 备货 / 打包", "维修 / 返修", "其他"):
+        raise ValueError("请选择公司内部工作的类别")
+    if out["type"] == "公司内部工作" and not out["location"]:
+        raise ValueError("请填写公司内部工作的地点")
     if out["status"] == "已完成" and (not out["hours"] or float(out["hours"]) <= 0):
         raise ValueError("完成服务时请填写工程师投入工时")
     return out
