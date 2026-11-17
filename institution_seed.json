@@ -509,5 +509,91 @@
     "name": "南开国际先进研究院（深圳）",
     "kind": "科研院所",
     "source": "深圳市财政局科研院所名录、深圳市科技类事业单位名录、深圳虚拟大学园研究院名录"
+  },
+  {
+    "name": "华中师范大学",
+    "aliases": "华中师大; Central China Normal University; CCNU",
+    "kind": "高校",
+    "district": "湖北省武汉市洪山区",
+    "address": "珞喻路152号",
+    "source": "华中师范大学2026年全日制普通本科招生章程：https://zs.ccnu.edu.cn/info/1006/11433.htm"
+  },
+  {
+    "name": "香港科技大学（广州）",
+    "aliases": "港科大（广州）; 港科广; HKUST (GZ)",
+    "kind": "高校",
+    "district": "广东省广州市南沙区",
+    "address": "笃学路1号",
+    "source": "香港科技大学（广州）2026年本科招生章程：https://ugadmissions.hkust-gz.edu.cn/article/AdmissionPolicies/?student_type=HongKongMacaoTaiwan&zbid=16"
+  },
+  {
+    "name": "澳门大学",
+    "aliases": "澳門大學; University of Macau; 澳大",
+    "kind": "高校",
+    "district": "澳门特别行政区",
+    "source": "澳门教育及青年发展局院校资讯：https://portal.dsedj.gov.mo/webdsejspace/site/studyinmacau/tc/campus-information.html"
+  },
+  {
+    "name": "澳门理工大学",
+    "aliases": "澳門理工大學; Macao Polytechnic University; 澳门理工学院",
+    "kind": "高校",
+    "district": "澳门特别行政区",
+    "source": "澳门教育及青年发展局院校资讯：https://portal.dsedj.gov.mo/webdsejspace/site/studyinmacau/tc/campus-information.html"
+  },
+  {
+    "name": "澳门旅游大学",
+    "aliases": "澳門旅遊大學; Macao University of Tourism; 澳门旅游学院",
+    "kind": "高校",
+    "district": "澳门特别行政区",
+    "source": "澳门教育及青年发展局院校资讯：https://portal.dsedj.gov.mo/webdsejspace/site/studyinmacau/tc/campus-information.html"
+  },
+  {
+    "name": "澳门保安部队高等学校",
+    "aliases": "澳門保安部隊高等學校; Academy of Public Security Forces",
+    "kind": "高校",
+    "district": "澳门特别行政区",
+    "source": "澳门教育及青年发展局院校资讯：https://portal.dsedj.gov.mo/webdsejspace/site/studyinmacau/tc/campus-information.html"
+  },
+  {
+    "name": "澳门科技大学",
+    "aliases": "澳門科技大學; Macau University of Science and Technology; 澳科大",
+    "kind": "高校",
+    "district": "澳门特别行政区",
+    "source": "澳门教育及青年发展局院校资讯：https://portal.dsedj.gov.mo/webdsejspace/site/studyinmacau/tc/campus-information.html"
+  },
+  {
+    "name": "澳门城市大学",
+    "aliases": "澳門城市大學; City University of Macau",
+    "kind": "高校",
+    "district": "澳门特别行政区",
+    "source": "澳门教育及青年发展局院校资讯：https://portal.dsedj.gov.mo/webdsejspace/site/studyinmacau/tc/campus-information.html"
+  },
+  {
+    "name": "圣若瑟大学",
+    "aliases": "聖若瑟大學; University of Saint Joseph",
+    "kind": "高校",
+    "district": "澳门特别行政区",
+    "source": "澳门教育及青年发展局院校资讯：https://portal.dsedj.gov.mo/webdsejspace/site/studyinmacau/tc/campus-information.html"
+  },
+  {
+    "name": "澳门镜湖护理学院",
+    "aliases": "澳門鏡湖護理學院; Kiang Wu Nursing College of Macau",
+    "kind": "高校",
+    "district": "澳门特别行政区",
+    "source": "澳门教育及青年发展局院校资讯：https://portal.dsedj.gov.mo/webdsejspace/site/studyinmacau/tc/campus-information.html"
+  },
+  {
+    "name": "澳门管理学院",
+    "aliases": "澳門管理學院; Macau Institute of Management",
+    "kind": "高校",
+    "district": "澳门特别行政区",
+    "source": "澳门教育及青年发展局院校资讯：https://portal.dsedj.gov.mo/webdsejspace/site/studyinmacau/tc/campus-information.html"
+  },
+  {
+    "name": "中西创新学院",
+    "aliases": "中西創新學院; Macau Millennium College",
+    "kind": "高校",
+    "district": "澳门特别行政区",
+    "source": "澳门教育及青年发展局院校资讯：https://portal.dsedj.gov.mo/webdsejspace/site/studyinmacau/tc/campus-information.html"
   }
 ]

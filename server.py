@@ -36,12 +36,15 @@ def connect():
     db.execute("CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS institutions (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, aliases TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, district TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '', contact_name TEXT NOT NULL DEFAULT '', contact_phone TEXT NOT NULL DEFAULT '', website TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '在用', updated_at INTEGER NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-    if not db.execute("SELECT 1 FROM app_state WHERE key='institutions_seeded'").fetchone():
-        seed_file = ROOT / "institution_seed.json"
-        if seed_file.exists():
-            for institution in json.loads(seed_file.read_text(encoding="utf-8")):
-                db.execute("INSERT OR IGNORE INTO institutions(name,aliases,kind,source,updated_at) VALUES(?,?,?,?,?)", (institution["name"], institution.get("aliases", ""), institution["kind"], institution.get("source", ""), int(time.time())))
-        db.execute("INSERT INTO app_state(key,value) VALUES('institutions_seeded','1')")
+    seed_file = ROOT / "institution_seed.json"
+    if seed_file.exists():
+        seed_text = seed_file.read_text(encoding="utf-8")
+        seed_hash = hashlib.sha256(seed_text.encode("utf-8")).hexdigest()
+        saved_hash = db.execute("SELECT value FROM app_state WHERE key='institutions_seed_hash'").fetchone()
+        if not saved_hash or saved_hash["value"] != seed_hash:
+            for institution in json.loads(seed_text):
+                db.execute("INSERT OR IGNORE INTO institutions(name,aliases,kind,district,address,website,source,updated_at) VALUES(?,?,?,?,?,?,?,?)", (institution["name"], institution.get("aliases", ""), institution["kind"], institution.get("district", ""), institution.get("address", ""), institution.get("website", ""), institution.get("source", ""), int(time.time())))
+            db.execute("INSERT OR REPLACE INTO app_state(key,value) VALUES('institutions_seed_hash',?)", (seed_hash,))
     db.commit()
     os.chmod(DATA_DIR, 0o700)
     os.chmod(DB_PATH, 0o600)
