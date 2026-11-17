@@ -16,6 +16,10 @@
   const today = () => localDate(new Date());
   let selectedCalendarDate = today();
   const typeInfo = name => types.find(t => t.name === name) || types[0];
+  const assistantsOf = record => Array.isArray(record.assistants) ? record.assistants : [];
+  const assignedTo = (record, name) => record.person === name || assistantsOf(record).some(a => a.person === name);
+  const personHours = (record, name) => record.person === name ? Number(record.hours) || 0 : assistantsOf(record).filter(a => a.person === name).reduce((sum, a) => sum + (Number(a.hours) || 0), 0);
+  const totalHours = record => (Number(record.hours) || 0) + assistantsOf(record).reduce((sum, a) => sum + (Number(a.hours) || 0), 0);
 
   async function request(url, options = {}) {
     const response = await fetch(url, { ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) } });
@@ -49,10 +53,10 @@
   function render() {
     const scope = periodRecords(), complete = scope.filter(r => r.status === '已完成').length;
     const waiting = scope.filter(r => r.status !== '已完成').length;
-    const hours = scope.reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
+    const hours = scope.reduce((sum, r) => sum + totalHours(r), 0);
     $('stats').innerHTML = [
       ['服务任务', scope.length, '本周期登记总数', '▦'], ['已完成', complete, '已完成任务', '✓'],
-      ['待跟进', waiting, '待处理或处理中', '◷'], ['服务用时', hours.toFixed(1), '小时 · 已登记工时', '◴']
+      ['待跟进', waiting, '待处理或处理中', '◷'], ['工程师人时', hours.toFixed(1), '小时 · 主处理与协助工时合计', '◴']
     ].map(([label, value, note, icon]) => `<div class="card stat"><div class="stat-head">${label}<span class="stat-icon">${icon}</span></div><strong>${value}</strong><small>${note}</small></div>`).join('');
     const max = Math.max(1, ...types.map(t => scope.filter(r => r.type === t.name).length));
     $('typeBars').innerHTML = types.map(t => {
@@ -60,23 +64,23 @@
       return `<div class="bar-row"><span class="bar-label">${t.name}</span><div class="bar-track"><div class="bar-fill" style="width:${count ? Math.max(4, count / max * 100) : 0}%"></div></div><span class="bar-num">${count}</span></div>`;
     }).join('');
     $('team').innerHTML = people.map(person => {
-      const list = scope.filter(r => r.person === person.name);
-      const personHours = list.reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
-      return `<div class="member"><div class="avatar">${person.name.slice(-1)}</div><div class="member-main"><b>${person.name}</b><small>${person.role}</small></div><div class="member-count">${list.length}<small>${personHours.toFixed(1)} 小时</small></div></div>`;
+      const list = scope.filter(r => assignedTo(r, person.name));
+      const hoursForPerson = list.reduce((sum, r) => sum + personHours(r, person.name), 0);
+      return `<div class="member"><div class="avatar">${person.name.slice(-1)}</div><div class="member-main"><b>${person.name}</b><small>${person.role}</small></div><div class="member-count">${list.length}<small>${hoursForPerson.toFixed(1)} 小时</small></div></div>`;
     }).join('');
     $('workloadBody').innerHTML = people.map(person => {
-      const list = scope.filter(r => r.person === person.name);
+      const list = scope.filter(r => assignedTo(r, person.name));
       const counts = types.map(t => list.filter(r => r.type === t.name).length);
-      const hoursForPerson = list.reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
+      const hoursForPerson = list.reduce((sum, r) => sum + personHours(r, person.name), 0);
       return `<tr><td><b>${esc(person.name)}</b></td><td>${list.length}</td>${counts.map(n => `<td>${n}</td>`).join('')}<td>${list.filter(r => r.status === '已完成').length}</td><td>${hoursForPerson.toFixed(1)} 小时</td></tr>`;
     }).join('');
     const startLabel = $('rangeStart').value || '开始不限', endLabel = $('rangeEnd').value || '至今';
-    $('workloadCaption').textContent = `统计范围：${startLabel} 至 ${endLabel}；任务按单据中的主处理工程师统计`;
+    $('workloadCaption').textContent = `统计范围：${startLabel} 至 ${endLabel}；任务和工时按主处理及协助工程师分别统计`;
     const query = $('search').value.trim().toLowerCase(), type = $('filterType').value, person = $('filterPerson').value, status = $('filterStatus').value;
-    const list = records.filter(r => (!type || r.type === type) && (!person || r.person === person) && (!status || r.status === status) && (!query || [r.customer, r.project, r.description, r.result, r.person, r.location, r.source].join(' ').toLowerCase().includes(query))).sort((a, b) => b.date.localeCompare(a.date));
+    const list = records.filter(r => (!type || r.type === type) && (!person || assignedTo(r, person)) && (!status || r.status === status) && (!query || [r.customer, r.project, r.description, r.result, r.person, assistantsOf(r).map(a => a.person).join(' '), r.location, r.source].join(' ').toLowerCase().includes(query))).sort((a, b) => b.date.localeCompare(a.date));
     $('recordCount').textContent = `共 ${list.length} 条记录`;
     $('empty').hidden = list.length > 0;
-    $('tbody').innerHTML = list.map(r => `<tr><td>${esc(r.date)}${r.service_time ? `<div class="muted">${esc(r.service_time)}</div>` : ''}</td><td><span class="type-tag tag-${typeInfo(r.type).key}">${esc(r.type)}</span></td><td><b>${esc(r.customer)}</b><div class="muted">${esc(r.project || '未关联项目')}</div></td><td>${esc(r.person)}</td><td title="${esc(r.description)}">${esc(r.description.length > 34 ? r.description.slice(0, 34) + '…' : r.description)}</td><td>${Number(r.hours || 0) || '—'} 小时</td><td><span class="status ${r.status === '已完成' ? 'done' : r.status === '处理中' ? 'processing' : 'pending'}">${esc(r.status)}</span></td><td><div class="row-actions"><button class="link-btn" data-print="${esc(r.id)}">打印</button><button class="link-btn" data-edit="${esc(r.id)}">编辑</button><button class="link-btn delete" data-delete="${esc(r.id)}">删除</button></div></td></tr>`).join('');
+    $('tbody').innerHTML = list.map(r => `<tr><td>${esc(r.date)}${r.service_time ? `<div class="muted">${esc(r.service_time)}</div>` : ''}</td><td><span class="type-tag tag-${typeInfo(r.type).key}">${esc(r.type)}</span></td><td><b>${esc(r.customer)}</b><div class="muted">${esc(r.project || '未关联项目')}</div></td><td>${esc(r.person)}${assistantsOf(r).length ? `<div class="muted">协助：${assistantsOf(r).map(a => esc(a.person)).join('、')}</div>` : ''}</td><td title="${esc(r.description)}">${esc(r.description.length > 34 ? r.description.slice(0, 34) + '…' : r.description)}</td><td>${totalHours(r).toFixed(1)} 小时</td><td><span class="status ${r.status === '已完成' ? 'done' : r.status === '处理中' ? 'processing' : 'pending'}">${esc(r.status)}</span></td><td><div class="row-actions"><button class="link-btn" data-print="${esc(r.id)}">打印</button><button class="link-btn" data-edit="${esc(r.id)}">编辑</button><button class="link-btn delete" data-delete="${esc(r.id)}">删除</button></div></td></tr>`).join('');
     renderCalendar(); renderInstitutions();
   }
   function renderInstitutions() {
@@ -93,26 +97,27 @@
   function renderCalendar() {
     const person = $('calendarPerson').value || people[0].name, year = calendarMonth.getFullYear(), month = calendarMonth.getMonth();
     $('monthLabel').textContent = `${year}年${month + 1}月`;
-    const monthRecords = records.filter(r => r.person === person && r.date?.startsWith(`${year}-${String(month + 1).padStart(2, '0')}-`));
+    const monthRecords = records.filter(r => assignedTo(r, person) && r.date?.startsWith(`${year}-${String(month + 1).padStart(2, '0')}-`));
     const profile = people.find(p => p.name === person) || people[0];
-    $('calendarProfile').innerHTML = `<div class="avatar">${profile.name.slice(-1)}</div><div class="profile-info"><b>${esc(profile.name)}</b><small>${esc(profile.role)} · 日历档案</small></div><div class="profile-stats"><span>${monthRecords.length}<small>本月服务</small></span><span>${monthRecords.reduce((s,r)=>s+(Number(r.hours)||0),0).toFixed(1)}<small>登记工时</small></span></div>`;
+    $('calendarProfile').innerHTML = `<div class="avatar">${profile.name.slice(-1)}</div><div class="profile-info"><b>${esc(profile.name)}</b><small>${esc(profile.role)} · 日历档案</small></div><div class="profile-stats"><span>${monthRecords.length}<small>参与服务</small></span><span>${monthRecords.reduce((s,r)=>s+personHours(r,person),0).toFixed(1)}<small>个人工时</small></span></div>`;
     const first = new Date(year, month, 1), start = new Date(year, month, 1 - first.getDay()), todayText = today();
     const heads = ['日','一','二','三','四','五','六'].map(d => `<div class="cal-head">周${d}</div>`).join('');
     let cells = '';
     for (let i = 0; i < 42; i++) {
       const date = new Date(start); date.setDate(start.getDate() + i);
-      const iso = localDate(date), count = records.filter(r => r.person === person && r.date === iso).length;
+      const iso = localDate(date), count = records.filter(r => assignedTo(r, person) && r.date === iso).length;
       const cls = ['cal-day', date.getMonth() !== month ? 'outside' : '', iso === todayText ? 'today' : '', iso === selectedCalendarDate ? 'selected' : ''].filter(Boolean).join(' ');
       cells += `<button class="${cls}" data-calendar-date="${iso}"><span class="cal-num">${date.getDate()}</span>${count ? `<br><span class="cal-count">${count} 项</span>` : ''}</button>`;
     }
     $('calendarGrid').innerHTML = heads + cells;
     $('selectedDateTitle').textContent = `${selectedCalendarDate} · ${person}`;
-    const items = records.filter(r => r.person === person && r.date === selectedCalendarDate);
-    const serviceHtml = items.map(r => `<div class="cal-item"><span class="type-tag tag-${typeInfo(r.type).key}">${esc(r.type)}</span><div><b>${esc(r.customer)}${r.project ? ` · ${esc(r.project)}` : ''}</b><small>${esc(r.description)}${r.hours ? ` · ${esc(r.hours)} 小时` : ''}</small></div></div>`);
+    const items = records.filter(r => assignedTo(r, person) && r.date === selectedCalendarDate);
+    const serviceHtml = items.map(r => `<div class="cal-item"><span class="type-tag tag-${typeInfo(r.type).key}">${esc(r.type)}</span><div><b>${esc(r.customer)}${r.project ? ` · ${esc(r.project)}` : ''}</b><small>${r.person === person ? '主处理' : '协助'} · ${esc(r.description)} · ${personHours(r,person).toFixed(1)} 小时</small></div></div>`);
     $('selectedDateItems').innerHTML = serviceHtml.join('') || '<div class="cal-empty">当天没有已登记服务。</div>';
   }
   function openModal(id) {
     $('recordForm').reset(); $('recordId').value = ''; $('date').value = today(); $('status').value = '待处理';
+    $('assistantRows').innerHTML = '';
     $('modalTitle').textContent = id ? '编辑上门服务单' : '新建上门服务单';
     if (id) {
       const record = records.find(r => r.id === id); if (!record) return;
@@ -121,7 +126,19 @@
       $('recordId').value = id;
     } else { $('channel').dataset.saved = ''; $('channel').value = ''; }
     updateServiceFields();
+    renderAssistantRows(id ? assistantsOf(records.find(r => r.id === id)) : []);
     $('modalBack').classList.add('open');
+  }
+  function collectAssistantRows() {
+    return [...$('assistantRows').querySelectorAll('.assistant-row')].map(row => ({ person: row.querySelector('.assistant-person').value, hours: row.querySelector('.assistant-hours').value.trim() }));
+  }
+  function renderAssistantRows(rows) {
+    const primary = $('person').value;
+    $('assistantRows').innerHTML = rows.map((assistant, index) => {
+      const occupied = new Set(rows.filter((_, i) => i !== index).map(item => item.person));
+      const choices = people.filter(person => person.name !== primary && (!occupied.has(person.name) || person.name === assistant.person));
+      return `<div class="assistant-row"><select class="assistant-person" required>${choices.map(person => `<option${person.name === assistant.person ? ' selected' : ''}>${esc(person.name)}</option>`).join('')}</select><input class="assistant-hours" type="number" min="0.25" step="0.25" placeholder="协助工时（小时）" value="${esc(assistant.hours ?? '')}" required><button type="button" class="assistant-remove" data-remove-assistant>移除</button></div>`;
+    }).join('');
   }
   function updateServiceFields() {
     const type = $('type').value, delivery = type === '上门送货', maintenance = type === '上门维护';
@@ -151,6 +168,7 @@
     $('hours').required = $('status').value === '已完成';
   }
   $('type').addEventListener('change', () => { $('channel').dataset.saved = ''; updateServiceFields(); });
+  $('person').addEventListener('change', () => renderAssistantRows(collectAssistantRows().filter(a => a.person !== $('person').value)));
   $('status').addEventListener('change', updateServiceFields);
   function closeModal() { $('modalBack').classList.remove('open'); }
   function openInstitutionModal(id) {
@@ -164,7 +182,7 @@
       const institutionNames = new Set([institution.name, ...String(institution.aliases || '').split(/[、；;,，]/).map(x => x.trim()).filter(Boolean)]);
       const history = records.filter(r => institutionNames.has(r.customer)).sort((a,b) => b.date.localeCompare(a.date)).slice(0,10);
       $('institutionHistory').hidden = false;
-      $('institutionHistory').innerHTML = `<h3>关联服务记录（${institution.service_count || 0}）</h3>${history.length ? history.map(r => `<div class="institution-history-row"><b>${esc(r.date)} · ${esc(r.type)} · ${esc(r.person)}</b><span>${esc(r.description)}${r.hours ? ` · ${esc(r.hours)} 小时` : ''}</span></div>`).join('') : '<div class="muted">还没有与该单位名称匹配的服务记录。</div>'}`;
+      $('institutionHistory').innerHTML = `<h3>关联服务记录（${institution.service_count || 0}）</h3>${history.length ? history.map(r => `<div class="institution-history-row"><b>${esc(r.date)} · ${esc(r.type)} · ${esc(r.person)}${assistantsOf(r).length ? `（协助：${assistantsOf(r).map(a => esc(a.person)).join('、')}）` : ''}</b><span>${esc(r.description)}${totalHours(r) ? ` · ${totalHours(r).toFixed(1)} 人时` : ''}</span></div>`).join('') : '<div class="muted">还没有与该单位名称匹配的服务记录。</div>'}`;
     } else {
       $('instKind').value = '高校'; $('instStatus').value = '在用'; $('institutionHistory').hidden = true; $('institutionHistory').innerHTML = '';
     }
@@ -178,6 +196,16 @@
   $('modalBack').onclick = event => { if (event.target === $('modalBack')) closeModal(); };
   document.onkeydown = event => { if (event.key === 'Escape') { closeModal(); closeInstitutionModal(); } };
   $('addInstitutionBtn').onclick = () => openInstitutionModal();
+  $('addAssistantBtn').onclick = () => {
+    const rows = collectAssistantRows(), used = new Set(rows.map(row => row.person));
+    const available = people.find(person => person.name !== $('person').value && !used.has(person.name));
+    if (!available) { toast('其他成员已全部添加'); return; }
+    rows.push({ person: available.name, hours: '' }); renderAssistantRows(rows);
+  };
+  $('assistantRows').onclick = event => {
+    if (!event.target.closest('[data-remove-assistant]')) return;
+    renderAssistantRows(collectAssistantRows().filter((_, index) => index !== [...$('assistantRows').children].indexOf(event.target.closest('.assistant-row'))));
+  };
   $('closeInstitutionModal').onclick = $('cancelInstitutionBtn').onclick = closeInstitutionModal;
   $('institutionModalBack').onclick = event => { if (event.target === $('institutionModalBack')) closeInstitutionModal(); };
   $('institutionBody').onclick = event => { const button = event.target.closest('[data-institution]'); if (button) openInstitutionModal(button.dataset.institution); };
@@ -195,6 +223,7 @@
     event.preventDefault();
     const id = $('recordId').value, body = {};
     for (const key of ['date', 'type', 'person', 'source', 'customer', 'project', 'sales', 'location', 'channel', 'equipment', 'quantity', 'hours', 'status', 'description', 'result', 'contact_name', 'contact_phone', 'service_time', 'problem', 'parts', 'follow_up']) body[key] = $(key).value.trim();
+    body.assistants = collectAssistantRows();
     try {
       await request(id ? `/api/records/${encodeURIComponent(id)}` : '/api/records', { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) });
       closeModal(); await reloadRecords(); toast(id ? '记录已更新' : '服务记录已保存');
@@ -223,7 +252,7 @@
   $('nextMonth').onclick = () => { calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1); selectedCalendarDate = localDate(calendarMonth); renderCalendar(); };
   $('calendarGrid').onclick = event => { const cell = event.target.closest('[data-calendar-date]'); if (!cell) return; selectedCalendarDate = cell.dataset.calendarDate; const date = new Date(`${selectedCalendarDate}T12:00:00`); calendarMonth = new Date(date.getFullYear(), date.getMonth(), 1); renderCalendar(); };
   $('exportBtn').onclick = () => {
-    const rows = [['服务日期', '服务类型', '处理人员', '任务来源', '用户/单位', '所属项目', '负责销售', '服务地点', '现场联系人', '联系电话', '服务时间', '服务渠道', '设备型号与数量', '设备总数', '用时(小时)', '状态', '故障/需求/任务', '服务内容', '更换配件', '处理结果', '后续跟进'], ...records.map(r => ['date', 'type', 'person', 'source', 'customer', 'project', 'sales', 'location', 'contact_name', 'contact_phone', 'service_time', 'channel', 'equipment', 'quantity', 'hours', 'status', 'problem', 'description', 'parts', 'result', 'follow_up'].map(k => r[k] || ''))];
+    const rows = [['服务日期', '服务类型', '主处理工程师', '协助工程师及工时', '任务来源', '用户/单位', '所属项目', '负责销售', '服务地点', '现场联系人', '联系电话', '服务时间', '服务渠道', '设备型号与数量', '设备总数', '总人时', '状态', '故障/需求/任务', '服务内容', '更换配件', '处理结果', '后续跟进'], ...records.map(r => ['date', 'type', 'person'].map(k => r[k] || '').concat([assistantsOf(r).map(a => `${a.person} ${a.hours}h`).join('；')], ['source', 'customer', 'project', 'sales', 'location', 'contact_name', 'contact_phone', 'service_time', 'channel', 'equipment', 'quantity'].map(k => r[k] || ''), [totalHours(r).toFixed(1)], ['status', 'problem', 'description', 'parts', 'result', 'follow_up'].map(k => r[k] || '')))];
     const csv = '\ufeff' + rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })), link = document.createElement('a');
     link.href = url; link.download = `售后服务记录_${today()}.csv`; link.click(); URL.revokeObjectURL(url); toast('已导出 CSV');
@@ -231,8 +260,8 @@
   $('exportWorkloadBtn').onclick = () => {
     const scope = periodRecords();
     const rows = [['工程师', '任务总数', ...types.map(t => t.name), '已完成', '投入工时(小时)'], ...people.map(person => {
-      const list = scope.filter(r => r.person === person.name);
-      return [person.name, list.length, ...types.map(t => list.filter(r => r.type === t.name).length), list.filter(r => r.status === '已完成').length, list.reduce((sum, r) => sum + (Number(r.hours) || 0), 0).toFixed(1)];
+      const list = scope.filter(r => assignedTo(r, person.name));
+      return [person.name, list.length, ...types.map(t => list.filter(r => r.type === t.name).length), list.filter(r => r.status === '已完成').length, list.reduce((sum, r) => sum + personHours(r, person.name), 0).toFixed(1)];
     })];
     const csv = '\ufeff' + rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })), link = document.createElement('a');
@@ -241,7 +270,7 @@
   function printRecord(record) {
     if (!record) return;
     const field = (label, value) => `<div><b>${label}：</b>${esc(value || '—')}</div>`;
-    $('printArea').innerHTML = `<h1>售后服务单</h1><div class="print-meta">${field('单据类型', record.type)}${field('服务日期', record.date)}${field('主处理工程师', record.person)}${field('任务来源', record.source)}${field('状态', record.status)}${field('用户 / 单位', record.customer)}${field('所属项目', record.project)}${field('负责销售', record.sales)}${field('服务地点', record.location)}${field('现场联系人', record.contact_name)}${field('联系电话', record.contact_phone)}${field('服务时间', record.service_time)}${field('投入工时', `${record.hours || 0} 小时`)}${field('设备总数', record.quantity)}${field('服务渠道', record.channel)}</div><h2>设备型号与数量</h2><div class="print-content">${esc(record.equipment || '—')}</div><h2>故障 / 用户需求 / 任务内容</h2><div class="print-content">${esc(record.problem || '—')}</div><h2>服务内容</h2><div class="print-content">${esc(record.description || '—')}</div><h2>更换配件</h2><div class="print-content">${esc(record.parts || '—')}</div><h2>处理结果 / 用户确认</h2><div class="print-content">${esc(record.result || '—')}</div><h2>后续跟进</h2><div class="print-content">${esc(record.follow_up || '—')}</div><div class="signatures"><span>工程师签字：</span><span>用户确认：</span></div>`;
+    $('printArea').innerHTML = `<h1>售后服务单</h1><div class="print-meta">${field('单据类型', record.type)}${field('服务日期', record.date)}${field('主处理工程师', record.person)}${field('协助工程师', assistantsOf(record).map(a => `${a.person}（${a.hours} 小时）`).join('、'))}${field('任务来源', record.source)}${field('状态', record.status)}${field('用户 / 单位', record.customer)}${field('所属项目', record.project)}${field('负责销售', record.sales)}${field('服务地点', record.location)}${field('现场联系人', record.contact_name)}${field('联系电话', record.contact_phone)}${field('服务时间', record.service_time)}${field('投入人时', `${totalHours(record).toFixed(1)} 小时`)}${field('设备总数', record.quantity)}${field('服务渠道', record.channel)}</div><h2>设备型号与数量</h2><div class="print-content">${esc(record.equipment || '—')}</div><h2>故障 / 用户需求 / 任务内容</h2><div class="print-content">${esc(record.problem || '—')}</div><h2>服务内容</h2><div class="print-content">${esc(record.description || '—')}</div><h2>更换配件</h2><div class="print-content">${esc(record.parts || '—')}</div><h2>处理结果 / 用户确认</h2><div class="print-content">${esc(record.result || '—')}</div><h2>后续跟进</h2><div class="print-content">${esc(record.follow_up || '—')}</div><div class="signatures"><span>工程师签字：</span><span>用户确认：</span></div>`;
     window.print();
   }
   $('logoutBtn').onclick = async () => { await request('/api/logout', { method: 'POST', body: '{}' }); location.href = '/login'; };

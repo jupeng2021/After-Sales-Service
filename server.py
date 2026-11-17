@@ -21,6 +21,7 @@ DATA_DIR = ROOT / "data"
 DB_PATH = DATA_DIR / "ass.db"
 COOKIE = "ass_session"
 SESSION_SECONDS = 60 * 60 * 24 * 14
+TEAM = ("陈巨鹏", "肖林", "洪凯")
 FIELDS = ("date", "type", "person", "customer", "project", "sales", "location", "channel", "equipment", "quantity", "hours", "status", "description", "result", "contact_name", "contact_phone", "service_time", "problem", "parts", "follow_up", "source")
 INSTITUTION_FIELDS = ("name", "aliases", "kind", "district", "address", "contact_name", "contact_phone", "website", "source", "notes", "status")
 
@@ -57,6 +58,8 @@ def clean_record(data):
     out = {k: str(data.get(k, "")).strip() for k in FIELDS}
     if not out["date"] or not out["type"] or not out["person"] or not out["customer"] or not out["description"]:
         raise ValueError("日期、类型、处理人员、用户/单位和服务内容为必填项")
+    if out["person"] not in TEAM:
+        raise ValueError("主处理工程师不在成员名单中")
     try:
         if out["hours"] and (not math.isfinite(float(out["hours"])) or float(out["hours"]) < 0):
             raise ValueError
@@ -64,6 +67,23 @@ def clean_record(data):
             raise ValueError
     except ValueError:
         raise ValueError("用时和数量必须是有效的非负数字")
+    assistants = data.get("assistants", [])
+    if not isinstance(assistants, list):
+        raise ValueError("协助工程师格式无效")
+    cleaned_assistants, assistant_names = [], set()
+    for assistant in assistants:
+        if not isinstance(assistant, dict):
+            raise ValueError("协助工程师格式无效")
+        name = str(assistant.get("person", "")).strip()
+        try:
+            assistant_hours = float(assistant.get("hours", ""))
+            if name not in TEAM or name == out["person"] or name in assistant_names or not math.isfinite(assistant_hours) or assistant_hours <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError("每位协助工程师需为其他成员，并填写大于 0 的独立工时")
+        assistant_names.add(name)
+        cleaned_assistants.append({"person": name, "hours": str(assistant_hours)})
+    out["assistants"] = cleaned_assistants
     if out["type"] == "上门送货" and not all(out[key] for key in ("location", "service_time", "equipment", "quantity")):
         raise ValueError("上门送货单请填写送达地址、送达时间、设备型号和数量")
     if out["type"] == "上门维护" and not all(out[key] for key in ("location", "service_time", "problem")):
