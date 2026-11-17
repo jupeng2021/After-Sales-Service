@@ -13,7 +13,7 @@
   let selectedCalendarDate = today();
   const $ = id => document.getElementById(id);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const today = () => new Date().toISOString().slice(0, 10);
+  const today = () => localDate(new Date());
   const typeInfo = name => types.find(t => t.name === name) || types[0];
 
   async function request(url, options = {}) {
@@ -34,12 +34,16 @@
   fillOptions($('person'), people); fillOptions($('filterPerson'), people, '全部成员');
   fillOptions($('calendarPerson'), people);
 
+  function setPeriodDates(period) {
+    const now = new Date(), end = localDate(now);
+    if (period === 'all') { $('rangeStart').value = ''; $('rangeEnd').value = ''; return; }
+    const start = period === 'year' ? new Date(now.getFullYear(), 0, 1) : new Date(now.getFullYear(), now.getMonth(), 1);
+    $('rangeStart').value = localDate(start); $('rangeEnd').value = end;
+  }
+  setPeriodDates('month');
   function periodRecords() {
-    const period = $('period').value, now = new Date();
-    return records.filter(r => {
-      const date = new Date(`${r.date}T12:00:00`);
-      return period === 'all' || (period === 'year' ? date.getFullYear() === now.getFullYear() : date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth());
-    });
+    const start = $('rangeStart').value, end = $('rangeEnd').value;
+    return records.filter(r => (!start || r.date >= start) && (!end || r.date <= end));
   }
   function render() {
     const scope = periodRecords(), complete = scope.filter(r => r.status === '已完成').length;
@@ -59,6 +63,14 @@
       const personHours = list.reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
       return `<div class="member"><div class="avatar">${person.name.slice(-1)}</div><div class="member-main"><b>${person.name}</b><small>${person.role}</small></div><div class="member-count">${list.length}<small>${personHours.toFixed(1)} 小时</small></div></div>`;
     }).join('');
+    $('workloadBody').innerHTML = people.map(person => {
+      const list = scope.filter(r => r.person === person.name);
+      const counts = types.map(t => list.filter(r => r.type === t.name).length);
+      const hoursForPerson = list.reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
+      return `<tr><td><b>${esc(person.name)}</b></td><td>${list.length}</td>${counts.map(n => `<td>${n}</td>`).join('')}<td>${list.filter(r => r.status === '已完成').length}</td><td>${hoursForPerson.toFixed(1)} 小时</td></tr>`;
+    }).join('');
+    const startLabel = $('rangeStart').value || '开始不限', endLabel = $('rangeEnd').value || '至今';
+    $('workloadCaption').textContent = `统计范围：${startLabel} 至 ${endLabel}；任务按单据中的主处理工程师统计`;
     const query = $('search').value.trim().toLowerCase(), type = $('filterType').value, person = $('filterPerson').value, status = $('filterStatus').value;
     const list = records.filter(r => (!type || r.type === type) && (!person || r.person === person) && (!status || r.status === status) && (!query || [r.customer, r.project, r.description, r.result, r.person, r.location].join(' ').toLowerCase().includes(query))).sort((a, b) => b.date.localeCompare(a.date));
     $('recordCount').textContent = `共 ${list.length} 条记录`;
@@ -140,7 +152,9 @@
       catch (error) { toast(error.message); }
     }
   };
-  for (const id of ['period', 'filterType', 'filterPerson', 'filterStatus']) $(id).addEventListener('change', render);
+  $('period').addEventListener('change', () => { setPeriodDates($('period').value); render(); });
+  for (const id of ['rangeStart', 'rangeEnd']) $(id).addEventListener('change', () => { $('period').value = 'custom'; render(); });
+  for (const id of ['filterType', 'filterPerson', 'filterStatus']) $(id).addEventListener('change', render);
   $('search').addEventListener('input', render);
   function setNav(button) { document.querySelectorAll('.nav button').forEach(item => item.classList.remove('active')); button.classList.add('active'); }
   $('navRecords').onclick = () => { setNav($('navRecords')); $('calendarPanel').hidden = true; $('recordsPanel').scrollIntoView({ behavior: 'smooth' }); };
@@ -155,6 +169,16 @@
     const csv = '\ufeff' + rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })), link = document.createElement('a');
     link.href = url; link.download = `售后服务记录_${today()}.csv`; link.click(); URL.revokeObjectURL(url); toast('已导出 CSV');
+  };
+  $('exportWorkloadBtn').onclick = () => {
+    const scope = periodRecords();
+    const rows = [['工程师', '任务总数', ...types.map(t => t.name), '已完成', '投入工时(小时)'], ...people.map(person => {
+      const list = scope.filter(r => r.person === person.name);
+      return [person.name, list.length, ...types.map(t => list.filter(r => r.type === t.name).length), list.filter(r => r.status === '已完成').length, list.reduce((sum, r) => sum + (Number(r.hours) || 0), 0).toFixed(1)];
+    })];
+    const csv = '\ufeff' + rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })), link = document.createElement('a');
+    link.href = url; link.download = `工程师工作量_${today()}.csv`; link.click(); URL.revokeObjectURL(url); toast('已导出工作量统计');
   };
   function printRecord(record) {
     if (!record) return;
