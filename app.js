@@ -152,7 +152,7 @@
     $('equipmentField').hidden = !delivery;
     $('quantityField').hidden = !delivery;
     $('internalCategoryField').hidden = !internal;
-    $('internalCategory').required = internal;
+    $('internal_category').required = internal;
     $('equipment').required = delivery;
     $('quantity').required = delivery;
     $('customer').required = !internal;
