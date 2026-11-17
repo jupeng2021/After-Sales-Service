@@ -11,10 +11,10 @@
   let records = [];
   let institutions = [];
   let calendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-  let selectedCalendarDate = today();
   const $ = id => document.getElementById(id);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const today = () => localDate(new Date());
+  let selectedCalendarDate = today();
   const typeInfo = name => types.find(t => t.name === name) || types[0];
 
   async function request(url, options = {}) {
