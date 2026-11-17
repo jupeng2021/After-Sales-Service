@@ -9,6 +9,8 @@
     { name: '远程服务', key: 'remote' }, { name: '驻场服务', key: 'resident' }, { name: '大型项目', key: 'project' }
   ];
   let records = [];
+  let calendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  let selectedCalendarDate = today();
   const $ = id => document.getElementById(id);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const today = () => new Date().toISOString().slice(0, 10);
@@ -30,6 +32,7 @@
   }
   fillOptions($('type'), types); fillOptions($('filterType'), types, '全部类型');
   fillOptions($('person'), people); fillOptions($('filterPerson'), people, '全部成员');
+  fillOptions($('calendarPerson'), people);
 
   function periodRecords() {
     const period = $('period').value, now = new Date();
@@ -61,6 +64,28 @@
     $('recordCount').textContent = `共 ${list.length} 条记录`;
     $('empty').hidden = list.length > 0;
     $('tbody').innerHTML = list.map(r => `<tr><td>${esc(r.date)}</td><td><span class="type-tag tag-${typeInfo(r.type).key}">${esc(r.type)}</span></td><td><b>${esc(r.customer)}</b><div class="muted">${esc(r.project || '未关联项目')}</div></td><td>${esc(r.person)}</td><td title="${esc(r.description)}">${esc(r.description.length > 34 ? r.description.slice(0, 34) + '…' : r.description)}</td><td>${Number(r.hours || 0) || '—'}</td><td><span class="status ${r.status === '已完成' ? 'done' : r.status === '处理中' ? 'processing' : 'pending'}">${esc(r.status)}</span></td><td><div class="row-actions"><button class="link-btn" data-edit="${esc(r.id)}">编辑</button><button class="link-btn delete" data-delete="${esc(r.id)}">删除</button></div></td></tr>`).join('');
+    renderCalendar();
+  }
+  function localDate(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
+  function renderCalendar() {
+    const person = $('calendarPerson').value || people[0].name, year = calendarMonth.getFullYear(), month = calendarMonth.getMonth();
+    $('monthLabel').textContent = `${year}年${month + 1}月`;
+    const monthRecords = records.filter(r => r.person === person && r.date?.startsWith(`${year}-${String(month + 1).padStart(2, '0')}-`));
+    const profile = people.find(p => p.name === person) || people[0];
+    $('calendarProfile').innerHTML = `<div class="avatar">${profile.name.slice(-1)}</div><div class="profile-info"><b>${esc(profile.name)}</b><small>${esc(profile.role)} · 日历档案</small></div><div class="profile-stats"><span>${monthRecords.length}<small>本月服务</small></span><span>${monthRecords.reduce((s,r)=>s+(Number(r.hours)||0),0).toFixed(1)}<small>登记工时</small></span></div>`;
+    const first = new Date(year, month, 1), start = new Date(year, month, 1 - first.getDay()), todayText = today();
+    const heads = ['日','一','二','三','四','五','六'].map(d => `<div class="cal-head">周${d}</div>`).join('');
+    let cells = '';
+    for (let i = 0; i < 42; i++) {
+      const date = new Date(start); date.setDate(start.getDate() + i);
+      const iso = localDate(date), count = records.filter(r => r.person === person && r.date === iso).length;
+      const cls = ['cal-day', date.getMonth() !== month ? 'outside' : '', iso === todayText ? 'today' : '', iso === selectedCalendarDate ? 'selected' : ''].filter(Boolean).join(' ');
+      cells += `<button class="${cls}" data-calendar-date="${iso}"><span class="cal-num">${date.getDate()}</span>${count ? `<br><span class="cal-count">${count} 项</span>` : ''}</button>`;
+    }
+    $('calendarGrid').innerHTML = heads + cells;
+    $('selectedDateTitle').textContent = `${selectedCalendarDate} · ${person}`;
+    const items = records.filter(r => r.person === person && r.date === selectedCalendarDate);
+    $('selectedDateItems').innerHTML = items.length ? items.map(r => `<div class="cal-item"><span class="type-tag tag-${typeInfo(r.type).key}">${esc(r.type)}</span><div><b>${esc(r.customer)}${r.project ? ` · ${esc(r.project)}` : ''}</b><small>${esc(r.description)}${r.hours ? ` · ${esc(r.hours)} 小时` : ''}</small></div></div>`).join('') : '<div class="cal-empty">当天没有已登记的服务任务。</div>';
   }
   function openModal(id) {
     $('recordForm').reset(); $('recordId').value = ''; $('date').value = today(); $('status').value = '待处理';
@@ -98,7 +123,14 @@
   };
   for (const id of ['period', 'filterType', 'filterPerson', 'filterStatus']) $(id).addEventListener('change', render);
   $('search').addEventListener('input', render);
-  $('navRecords').onclick = () => { document.querySelectorAll('.nav button').forEach(button => button.classList.remove('active')); $('navRecords').classList.add('active'); $('recordsPanel').scrollIntoView({ behavior: 'smooth' }); };
+  function setNav(button) { document.querySelectorAll('.nav button').forEach(item => item.classList.remove('active')); button.classList.add('active'); }
+  $('navRecords').onclick = () => { setNav($('navRecords')); $('calendarPanel').hidden = true; $('recordsPanel').scrollIntoView({ behavior: 'smooth' }); };
+  $('navCalendar').onclick = () => { setNav($('navCalendar')); $('calendarPanel').hidden = false; renderCalendar(); $('calendarPanel').scrollIntoView({ behavior: 'smooth' }); };
+  $('navOverview').onclick = () => { setNav($('navOverview')); $('calendarPanel').hidden = true; window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  $('calendarPerson').addEventListener('change', renderCalendar);
+  $('prevMonth').onclick = () => { calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1); selectedCalendarDate = localDate(calendarMonth); renderCalendar(); };
+  $('nextMonth').onclick = () => { calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1); selectedCalendarDate = localDate(calendarMonth); renderCalendar(); };
+  $('calendarGrid').onclick = event => { const cell = event.target.closest('[data-calendar-date]'); if (!cell) return; selectedCalendarDate = cell.dataset.calendarDate; const date = new Date(`${selectedCalendarDate}T12:00:00`); calendarMonth = new Date(date.getFullYear(), date.getMonth(), 1); renderCalendar(); };
   $('exportBtn').onclick = () => {
     const rows = [['服务日期', '服务类型', '处理人员', '用户/单位', '所属项目', '负责销售', '服务地点', '服务渠道', '设备/配件', '数量', '用时(小时)', '状态', '服务内容', '处理结果'], ...records.map(r => ['date', 'type', 'person', 'customer', 'project', 'sales', 'location', 'channel', 'equipment', 'quantity', 'hours', 'status', 'description', 'result'].map(k => r[k] || ''))];
     const csv = '\ufeff' + rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\r\n');
